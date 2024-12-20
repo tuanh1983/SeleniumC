@@ -20,6 +20,7 @@ namespace Automation.TestCase.CGM.Portal
         [Test, Category("CGMPT_Portal")]
         public void Test1()
         {
+            Console.WriteLine($"Running Test1 in {GetType().Name} on Thread {Thread.CurrentThread.ManagedThreadId}");
             // Act: Perform login actions
             loginPage.ClickOnAuthenTab(2);
         }

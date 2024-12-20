@@ -1,72 +1,127 @@
-﻿using NUnit.Framework;
+﻿using AventStack.ExtentReports;
+using AventStack.ExtentReports.Reporter;
+using NUnit.Framework;
 using Automation.Utils;
 using Automation.Drivers;
 using OpenQA.Selenium;
+using System;
+using System.Threading;
 
 namespace Automation.Tests
 {
     public abstract class BaseTestCase
     {
-        protected IWebDriver driver;
+        // Use ThreadLocal for thread-safe WebDriver instances
+        private static ThreadLocal<IWebDriver> threadDriver = new ThreadLocal<IWebDriver>(() => null);
+        protected IWebDriver driver => threadDriver.Value;
+
         protected ModuleConfig moduleConfig;
         protected string Product { get; set; }
         protected string Module { get; set; }
         protected int TimeoutInSeconds { get; set; }
+        protected string user { get; set; }
+        protected string password { get; set; }
+
+        // ExtentReports setup
+        private static ExtentReports _extent;
+        private static ThreadLocal<ExtentTest> _test = new ThreadLocal<ExtentTest>(() => null);
+        protected ExtentTest Test => _test.Value;
+
+        [OneTimeSetUp]
+        public void InitializeExtentReports()
+        {
+            try
+            {
+                Console.WriteLine("Initializing ExtentReports...");
+
+                string reportPath = $"{AppDomain.CurrentDomain.BaseDirectory}Report\\SparkReport.html";
+
+                Console.WriteLine($"Report Path: {reportPath}");
+
+                Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
+
+                var sparkReporter = new ExtentSparkReporter(reportPath)
+                {
+                    Config =
+            {
+                DocumentTitle = "Automation Test Report",
+                ReportName = "Extent Report - Spark",
+                Theme = AventStack.ExtentReports.Reporter.Config.Theme.Dark
+            }
+                };
+
+                _extent = new ExtentReports();
+                _extent.AttachReporter(sparkReporter);
+                _extent.AddSystemInfo("Environment", "QA");
+                _extent.AddSystemInfo("Tester", "Your Name");
+                Console.WriteLine("ExtentReports initialized successfully.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error initializing ExtentReports: {ex.Message}");
+                throw;
+            }
+        }
+
 
         [SetUp]
         public virtual void SetUp()
         {
             try
             {
-                // Log step
                 Console.WriteLine("BaseTestCase SetUp started");
 
-                // Load Product and Module dynamically if not already set
+                // Create a new test in ExtentReports
+                _test.Value = _extent.CreateTest(TestContext.CurrentContext.Test.Name);
+
+                // Load Product and Module
                 Product = Product ?? TestContext.Parameters.Get("Product", "DefaultProduct");
                 Module = Module ?? TestContext.Parameters.Get("Module", "DefaultModule");
 
-                Console.WriteLine($"Product: {Product}, Module: {Module}");
+                Test.Info($"Product: {Product}, Module: {Module}");
 
-                // Load configuration for the specified Product and Module
+                // Load configuration
                 moduleConfig = ConfigReader.GetProductModuleConfig<ModuleConfig>(Product, Module);
                 if (moduleConfig == null)
                 {
                     throw new Exception($"Configuration not found for Product: {Product}, Module: {Module}");
                 }
 
-                Console.WriteLine($"Configuration loaded: BaseUrl={moduleConfig.BaseUrl}, Browser={moduleConfig.Browser}");
+                Test.Info($"Configuration loaded: BaseUrl={moduleConfig.BaseUrl}, Browser={moduleConfig.Browser}");
 
-                // Check and initialize WebDriver
+                // Initialize WebDriver
                 if (string.IsNullOrEmpty(moduleConfig.Browser))
                 {
                     throw new NotSupportedException("Browser is not specified in the configuration.");
                 }
 
-                driver = Automation.Drivers.WebDriverManager.GetDriver(moduleConfig.Browser);
-                if (driver == null)
+                if (threadDriver.Value == null)
                 {
-                    throw new Exception($"WebDriver could not be initialized for browser: {moduleConfig.Browser}");
+                    threadDriver.Value = Automation.Drivers.WebDriverManager.GetDriver(moduleConfig.Browser);
+                    Test.Info($"WebDriver initialized for browser: {moduleConfig.Browser}");
                 }
-
-                Console.WriteLine($"WebDriver initialized for browser: {moduleConfig.Browser}");
 
                 // Navigate to Base URL
                 if (string.IsNullOrEmpty(moduleConfig.BaseUrl))
                 {
                     throw new Exception("BaseUrl is not specified in the configuration.");
                 }
+
                 driver.Navigate().GoToUrl(moduleConfig.BaseUrl);
+                Test.Info($"Navigated to Base URL: {moduleConfig.BaseUrl}");
 
-                Console.WriteLine($"Navigated to Base URL: {moduleConfig.BaseUrl}");
-
-                // Set the timeout value
+                // Set timeout
                 TimeoutInSeconds = moduleConfig.Timeout;
-                Console.WriteLine($"Timeout set to: {TimeoutInSeconds} seconds");
+                Test.Info($"Timeout set to: {TimeoutInSeconds} seconds");
+
+                // Set user credentials
+                user = moduleConfig.Credentials.Username;
+                password = moduleConfig.Credentials.Password;
+                Test.Info($"User credentials set for: {user}");
             }
             catch (Exception ex)
             {
-                // Log the exception
-                Console.WriteLine($"Error during setup: {ex.Message}");
+                Test.Fail($"Error during setup: {ex.Message}");
                 throw;
             }
         }
@@ -76,18 +131,41 @@ namespace Automation.Tests
         {
             try
             {
-                // Flush the Extent report
-                //extent.Flush();
+                Test.Info("BaseTestCase TearDown started");
+
+                // Quit the WebDriver for this thread
+                if (driver != null)
+                {
+                    driver.Quit();
+                    threadDriver.Value = null; // Clear the value for this thread
+                    Test.Pass("WebDriver quit successfully");
+                }
+                else
+                {
+                    Test.Warning("No WebDriver instance found for this thread.");
+                }
             }
             catch (Exception ex)
             {
-                // Log the exception
-                Console.WriteLine($"Error flushing extent report: {ex.Message}");
+                Test.Fail($"Error during teardown: {ex.Message}");
             }
-            finally
+        }
+
+        // Final cleanup after all tests
+        [OneTimeTearDown]
+        public void FinalCleanup()
+        {
+            try
             {
-                // Quit the driver after all tests are done
-                driver?.Quit();
+                Console.WriteLine("Final cleanup: Disposing ThreadLocal WebDriver instances.");
+                threadDriver.Dispose();
+
+                // Flush the ExtentReports
+                _extent.Flush();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error during final cleanup: {ex.Message}");
             }
         }
     }
