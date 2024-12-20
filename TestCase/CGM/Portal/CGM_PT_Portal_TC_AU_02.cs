@@ -6,7 +6,7 @@ using Automation.Tests.CGM.Portal;
 namespace Automation.TestCase.CGM.Portal
 {
     [TestFixture, Parallelizable(ParallelScope.All)]
-    public class CGM_PT_Portal_TC_AU_01 : CGM_PT_Portal_BaseTestCase
+    public class CGM_PT_Portal_TC_AU_02 : CGM_PT_Portal_BaseTestCase
     {
         private CGMPortalLoginPage loginPage;
 
